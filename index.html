@@ -712,7 +712,7 @@
                     <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center font-bold text-white shadow-md">JM</div>
                     <div class="flex flex-col">
                         <span class="font-bold text-sm tracking-wide text-slate-800 dark:text-white">BACKEND PANEL</span>
-                        <span class="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono">● System Active</span>
+                        <span id="firebaseStatusIndicator" class="text-[10px] text-blue-600 dark:text-blue-400 font-mono">● Firebase Menghubungkan...</span>
                     </div>
                 </div>
             </div>
@@ -740,7 +740,10 @@
                 </button>
             </div>
         </div>
-        <div class="pt-4 border-t border-slate-200 dark:border-slate-800">
+        <div class="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-2">
+            <button onclick="manualSyncToFirestore()" class="w-full py-2 rounded-xl bg-blue-600/10 hover:bg-blue-600 text-blue-600 hover:text-white dark:text-blue-400 text-xs font-semibold transition-all flex items-center justify-center space-x-2 border border-blue-500/20">
+                <i class="fa-solid fa-cloud-arrow-up"></i> <span>Sync ke Firebase</span>
+            </button>
             <button onclick="closeAdminPanelModal()" class="w-full py-2.5 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-rose-500 hover:text-white text-slate-700 dark:text-slate-200 text-xs font-semibold transition-all flex items-center justify-center space-x-2">
                 <i class="fa-solid fa-right-from-bracket"></i> <span>Keluar Backend</span>
             </button>
@@ -749,6 +752,29 @@
 
     <!-- Main Content -->
     <div class="flex-1 bg-slate-50 dark:bg-slate-950 p-6 md:p-8 overflow-y-auto max-h-screen">
+
+        <!-- Firebase Rules Warning Banner (tampil otomatis jika permission-denied) -->
+        <div id="firebaseRulesBanner" class="hidden mb-6 p-5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200">
+            <div class="flex items-start gap-3">
+                <i class="fa-solid fa-triangle-exclamation text-amber-500 text-xl mt-0.5 shrink-0"></i>
+                <div class="space-y-2 text-xs">
+                    <p class="font-bold text-sm text-amber-800 dark:text-amber-300">Firebase Security Rules Masih Terkunci!</p>
+                    <p>Data belum bisa disimpan ke Firestore karena aturan keamanan (Rules) di Firebase Console menolak akses (<code class="bg-black/10 dark:bg-white/10 px-1 py-0.5 rounded font-mono">PERMISSION_DENIED</code>).</p>
+                    <div class="bg-black/5 dark:bg-white/5 p-3 rounded-xl border border-amber-500/20 font-mono text-[11px] select-all space-y-1">
+                        <p class="text-[10px] text-slate-500 dark:text-slate-400 font-sans">Salin aturan ini ke Firebase Console &gt; Firestore Database &gt; Rules:</p>
+                        <p>rules_version = '2';</p>
+                        <p>service cloud.firestore {</p>
+                        <p>&nbsp;&nbsp;match /databases/{database}/documents {</p>
+                        <p>&nbsp;&nbsp;&nbsp;&nbsp;match /{document=**} {</p>
+                        <p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;allow read, write: if true;</p>
+                        <p>&nbsp;&nbsp;&nbsp;&nbsp;}</p>
+                        <p>&nbsp;&nbsp;}</p>
+                        <p>}</p>
+                    </div>
+                    <p class="pt-1">Setelah klik <b>Publish</b> di Firebase Console, klik tombol <b>"Sync ke Firebase"</b> di sidebar panel ini.</p>
+                </div>
+            </div>
+        </div>
 
         <!-- Hero Tab -->
         <div id="heroTab" class="admin-tab-content space-y-6">
@@ -1144,6 +1170,10 @@
     </div>
 </footer>
 
+<!-- ===== FIREBASE SDK (COMPAT) ===== -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
 <!-- ===== JAVASCRIPT ===== -->
 <script>
     // ================================
@@ -1212,9 +1242,31 @@
     }
 
     // ================================
-    //  DATA & STATE
+    //  FIREBASE CONFIG & INITIALIZATION
     // ================================
-    var sectionsConfig = JSON.parse(localStorage.getItem('jml_sections_config')) || {
+    const firebaseConfig = {
+        apiKey: "AIzaSyATiXsxLRS4gcFCCPAm9V4wOiM2SuexvZk",
+        authDomain: "portfoliojmave28.firebaseapp.com",
+        projectId: "portfoliojmave28",
+        storageBucket: "portfoliojmave28.firebasestorage.app",
+        messagingSenderId: "474949467582",
+        appId: "1:474949467582:web:b4cf0e8dbcda71fdf14def"
+    };
+
+    var db = null;
+    try {
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        db = firebase.firestore();
+    } catch (err) {
+        console.error("Firebase init error:", err);
+    }
+
+    // ================================
+    //  DATA & STATE (DEFAULT FALLBACKS)
+    // ================================
+    var DEFAULT_SECTIONS_CONFIG = {
         hero: {
             badge: "Tugas ICT JMAVE",
             mainTitle: "PORTOFOLIO",
@@ -1245,7 +1297,7 @@
         }
     };
 
-    var categories = JSON.parse(localStorage.getItem('jml_categories')) || [
+    var DEFAULT_CATEGORIES = [
         { id: 1, key: 'prestasi', label: 'Prestasi' },
         { id: 2, key: 'karya', label: 'Karya' }
     ];
@@ -1285,29 +1337,262 @@
         title: "Tech Stack & Skills",
         subtitle: "Berikut beberapa teknologi dan keterampilan yang sedang saya tekuni untuk mengembangkan kemampuan di bidang digital.",
         badges: [
-            { id: 1, name: "HTML5", icon: "fab fa-html5", color: "text-orange-600 dark:text-orange-400",
-            label: "" },
-            { id: 2, name: "CSS3", icon: "fab fa-css3-alt", color: "text-blue-600 dark:text-blue-400",
-            label: "" },
-            { id: 3, name: "JavaScript", icon: "fab fa-js", color: "text-yellow-500 dark:text-yellow-400",
-                label: "" },
-            { id: 4, name: "AI Prompting", icon: "fa-solid fa-robot",
-                color: "text-purple-600 dark:text-purple-400", label: "" },
-            { id: 5, name: "GitHub", icon: "fab fa-github", color: "text-slate-800 dark:text-slate-300",
-                label: "" },
-            { id: 6, name: "Firebase", icon: "fa-solid fa-fire", color: "text-amber-500 dark:text-amber-400",
-                label: "Persiapan" }
+            { id: 1, name: "HTML5", icon: "fab fa-html5", color: "text-orange-600 dark:text-orange-400", label: "" },
+            { id: 2, name: "CSS3", icon: "fab fa-css3-alt", color: "text-blue-600 dark:text-blue-400", label: "" },
+            { id: 3, name: "JavaScript", icon: "fab fa-js", color: "text-yellow-500 dark:text-yellow-400", label: "" },
+            { id: 4, name: "AI Prompting", icon: "fa-solid fa-robot", color: "text-purple-600 dark:text-purple-400", label: "" },
+            { id: 5, name: "GitHub", icon: "fab fa-github", color: "text-slate-800 dark:text-slate-300", label: "" },
+            { id: 6, name: "Firebase", icon: "fa-solid fa-fire", color: "text-amber-500 dark:text-amber-400", label: "Aktif" }
         ]
     };
 
-    var projectsData = JSON.parse(localStorage.getItem('jml_projects')) || DEFAULT_PROJECTS;
-    var customSections = JSON.parse(localStorage.getItem('jml_custom_sections')) || [];
-    var techStackData = JSON.parse(localStorage.getItem('jml_tech_stack')) || DEFAULT_TECH_STACK;
-    var adminAuth = JSON.parse(localStorage.getItem('jml_admin_auth')) || { user: 'admin', pass: 'admin123' };
+    var sectionsConfig = JSON.parse(JSON.stringify(DEFAULT_SECTIONS_CONFIG));
+    var categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
+    var projectsData = JSON.parse(JSON.stringify(DEFAULT_PROJECTS));
+    var customSections = [];
+    var techStackData = JSON.parse(JSON.stringify(DEFAULT_TECH_STACK));
+    var adminAuth = { user: 'admin', pass: 'admin123' };
+    var savedProfileImage = "";
+    var contactEmail = "";
+    var contactTiktok = "";
 
     var activeFilter = 'all';
     var searchQuery = '';
     var currentCardImageData = "";
+
+    // ================================
+    //  FIRESTORE HELPER & SYNC
+    // ================================
+    function updateFirebaseStatus(status, msg) {
+        var indicator = document.getElementById('firebaseStatusIndicator');
+        var banner = document.getElementById('firebaseRulesBanner');
+        if (indicator) {
+            if (status === 'connected') {
+                indicator.className = 'text-[10px] text-emerald-600 dark:text-emerald-400 font-mono';
+                indicator.textContent = '● Firebase Terhubung';
+            } else if (status === 'error') {
+                indicator.className = 'text-[10px] text-rose-600 dark:text-rose-400 font-mono';
+                indicator.textContent = '● Firebase: Rules Terkunci';
+            } else if (status === 'syncing') {
+                indicator.className = 'text-[10px] text-blue-600 dark:text-blue-400 font-mono';
+                indicator.textContent = '● Firebase Menyinkronkan...';
+            }
+        }
+        if (banner) {
+            if (status === 'error') {
+                banner.classList.remove('hidden');
+            } else if (status === 'connected') {
+                banner.classList.add('hidden');
+            }
+        }
+    }
+
+    function handleFsError(err, context) {
+        console.error("Firestore Error [" + context + "]:", err);
+        if (err && err.code === 'permission-denied') {
+            updateFirebaseStatus('error');
+            showToast("Akses Ditolak (Rules)", "Security Rules Firestore menolak akses. Buka Firebase Console > Rules, ubah ke allow read, write: if true;");
+        } else {
+            showToast("Gagal Menyimpan", "Gagal menyimpan ke Firestore: " + (err.message || err));
+        }
+    }
+
+    function fsSave(docName, data, successTitle, successMsg) {
+        if (!db) {
+            console.warn("Firestore belum diinisialisasi.");
+            return;
+        }
+        try {
+            var cleanData = JSON.parse(JSON.stringify(data));
+            db.collection('portfolio').doc(docName).set(cleanData)
+                .then(function() {
+                    updateFirebaseStatus('connected');
+                    if (successTitle) showToast(successTitle, successMsg);
+                })
+                .catch(function(err) {
+                    handleFsError(err, docName);
+                });
+        } catch (e) {
+            console.error("Error serializing data for Firestore:", e);
+        }
+    }
+
+    function applyDataToUI() {
+        if (document.getElementById('heroBadgeDisplay') && sectionsConfig.hero)
+            document.getElementById('heroBadgeDisplay').innerHTML = sectionsConfig.hero.badge || '';
+        if (document.getElementById('heroMainTitleDisplay') && sectionsConfig.hero)
+            document.getElementById('heroMainTitleDisplay').innerHTML = sectionsConfig.hero.mainTitle || '';
+        if (document.getElementById('heroNameDisplay') && sectionsConfig.hero)
+            document.getElementById('heroNameDisplay').innerHTML = sectionsConfig.hero.name || '';
+        if (document.getElementById('heroSubtextDisplay') && sectionsConfig.hero)
+            document.getElementById('heroSubtextDisplay').innerHTML = sectionsConfig.hero.subtitle || '';
+
+        var heroImgDisplay = document.getElementById('heroImageDisplay');
+        if (heroImgDisplay) {
+            heroImgDisplay.src = savedProfileImage || createJmlSvgUri('JML');
+        }
+
+        if (document.getElementById('aboutSectionTitleDisplay') && sectionsConfig.about)
+            document.getElementById('aboutSectionTitleDisplay').innerHTML = sectionsConfig.about.title || '';
+        if (document.getElementById('aboutSectionSubtitleDisplay') && sectionsConfig.about)
+            document.getElementById('aboutSectionSubtitleDisplay').innerHTML = sectionsConfig.about.subtitle || '';
+
+        if (document.getElementById('projectsSectionTitleDisplay') && sectionsConfig.projects)
+            document.getElementById('projectsSectionTitleDisplay').innerHTML = sectionsConfig.projects.title || '';
+        if (document.getElementById('projectsSectionSubtitleDisplay') && sectionsConfig.projects)
+            document.getElementById('projectsSectionSubtitleDisplay').innerHTML = sectionsConfig.projects.subtitle || '';
+        if (document.getElementById('projectsSectionDescDisplay') && sectionsConfig.projects)
+            document.getElementById('projectsSectionDescDisplay').innerHTML = sectionsConfig.projects.desc || '';
+
+        if (document.getElementById('contactTitleDisplay') && sectionsConfig.contact)
+            document.getElementById('contactTitleDisplay').innerHTML = sectionsConfig.contact.title || '';
+        if (document.getElementById('contactSubtitleDisplay') && sectionsConfig.contact)
+            document.getElementById('contactSubtitleDisplay').innerHTML = sectionsConfig.contact.subtitle || '';
+        if (document.getElementById('footerCopyText') && sectionsConfig.footer)
+            document.getElementById('footerCopyText').innerHTML = sectionsConfig.footer.copy || '';
+
+        if (contactEmail) {
+            var emailText = document.getElementById('emailTextDisplay');
+            if (emailText) emailText.innerHTML = contactEmail;
+            var mailLink = document.getElementById('mailLinkBtn');
+            if (mailLink) mailLink.href = 'mailto:' + contactEmail;
+        }
+        if (contactTiktok) {
+            var ttUser = document.getElementById('footerTiktokUser');
+            if (ttUser) ttUser.innerHTML = '@' + contactTiktok;
+            var ttFootLink = document.getElementById('footerTiktokLink');
+            if (ttFootLink) ttFootLink.href = 'https://www.tiktok.com/@' + contactTiktok;
+            var ttBtn = document.getElementById('tiktokLinkBtn');
+            if (ttBtn) ttBtn.href = 'https://www.tiktok.com/@' + contactTiktok;
+        }
+
+        renderFilterButtons();
+        renderAboutCards();
+        renderTechStack();
+        renderProjects();
+        renderCustomSections();
+
+        var adminModal = document.getElementById('adminPanelModal');
+        if (adminModal && !adminModal.classList.contains('hidden')) {
+            renderCategoryList();
+            renderAdminProjectsList();
+            renderAdminCustomSections();
+            renderTechBadgeList();
+            renderAdminAboutCards();
+            updateTechVisibilityUI();
+        }
+    }
+
+    function initFirestoreSync() {
+        if (!db) {
+            updateFirebaseStatus('error', 'Firebase belum siap');
+            return;
+        }
+
+        updateFirebaseStatus('syncing');
+
+        db.collection('portfolio').onSnapshot(function(snapshot) {
+            updateFirebaseStatus('connected');
+
+            if (snapshot.empty) {
+                console.log("Koleksi Firestore masih kosong. Melakukan auto-seed...");
+                seedInitialFirestoreData();
+                return;
+            }
+
+            snapshot.forEach(function(doc) {
+                var d = doc.data();
+                if (doc.id === 'sections_config') {
+                    sectionsConfig = Object.assign({}, DEFAULT_SECTIONS_CONFIG, d);
+                    if (!sectionsConfig.hero) sectionsConfig.hero = DEFAULT_SECTIONS_CONFIG.hero;
+                    if (!sectionsConfig.about) sectionsConfig.about = DEFAULT_SECTIONS_CONFIG.about;
+                    if (!sectionsConfig.projects) sectionsConfig.projects = DEFAULT_SECTIONS_CONFIG.projects;
+                    if (!sectionsConfig.contact) sectionsConfig.contact = DEFAULT_SECTIONS_CONFIG.contact;
+                    if (!sectionsConfig.footer) sectionsConfig.footer = DEFAULT_SECTIONS_CONFIG.footer;
+                } else if (doc.id === 'categories') {
+                    categories = d.list || [];
+                } else if (doc.id === 'projects') {
+                    projectsData = d.list || [];
+                } else if (doc.id === 'custom_sections') {
+                    customSections = d.list || [];
+                } else if (doc.id === 'tech_stack') {
+                    techStackData = Object.assign({}, DEFAULT_TECH_STACK, d);
+                    if (!techStackData.badges) techStackData.badges = DEFAULT_TECH_STACK.badges;
+                } else if (doc.id === 'admin_auth') {
+                    adminAuth = d && d.user ? d : { user: 'admin', pass: 'admin123' };
+                } else if (doc.id === 'profile_image') {
+                    savedProfileImage = d.image || "";
+                } else if (doc.id === 'contact') {
+                    contactEmail = d.email || "";
+                    contactTiktok = d.tiktok || "";
+                }
+            });
+
+            applyDataToUI();
+        }, function(error) {
+            console.error("Firestore onSnapshot error:", error);
+            if (error && error.code === 'permission-denied') {
+                updateFirebaseStatus('error');
+                showToast("Firestore Rules Terkunci", "Akses Firestore ditolak. Buka tab Rules di Firebase Console.");
+            }
+        });
+    }
+
+    function manualSyncToFirestore() {
+        if (!db) {
+            showToast("Error", "Firebase belum terinisialisasi.");
+            return;
+        }
+        showToast("Menyinkronkan...", "Mengirim seluruh data portofolio ke Firestore...");
+        seedInitialFirestoreData(true);
+    }
+
+    function seedInitialFirestoreData(isManual) {
+        if (!db) return;
+        try {
+            var localSections = localStorage.getItem('jml_sections_config');
+            var localCats = localStorage.getItem('jml_categories');
+            var localProjects = localStorage.getItem('jml_projects');
+            var localCustom = localStorage.getItem('jml_custom_sections');
+            var localTech = localStorage.getItem('jml_tech_stack');
+            var localAuth = localStorage.getItem('jml_admin_auth');
+            var localImg = localStorage.getItem('jml_profile_image');
+            var localEmail = localStorage.getItem('jml_contact_email');
+            var localTiktok = localStorage.getItem('jml_contact_tiktok');
+
+            var initSections = localSections ? JSON.parse(localSections) : sectionsConfig;
+            var initCats = localCats ? JSON.parse(localCats) : categories;
+            var initProjects = localProjects ? JSON.parse(localProjects) : projectsData;
+            var initCustom = localCustom ? JSON.parse(localCustom) : customSections;
+            var initTech = localTech ? JSON.parse(localTech) : techStackData;
+            var initAuth = localAuth ? JSON.parse(localAuth) : adminAuth;
+            var initImg = localImg || savedProfileImage || "";
+            var initEmail = localEmail || contactEmail || "jason.liauw@example.com";
+            var initTiktok = localTiktok || contactTiktok || "_jealius_";
+
+            var batch = db.batch();
+            batch.set(db.collection('portfolio').doc('sections_config'), JSON.parse(JSON.stringify(initSections)));
+            batch.set(db.collection('portfolio').doc('categories'), { list: JSON.parse(JSON.stringify(initCats)) });
+            batch.set(db.collection('portfolio').doc('projects'), { list: JSON.parse(JSON.stringify(initProjects)) });
+            batch.set(db.collection('portfolio').doc('custom_sections'), { list: JSON.parse(JSON.stringify(initCustom)) });
+            batch.set(db.collection('portfolio').doc('tech_stack'), JSON.parse(JSON.stringify(initTech)));
+            batch.set(db.collection('portfolio').doc('admin_auth'), JSON.parse(JSON.stringify(initAuth)));
+            batch.set(db.collection('portfolio').doc('profile_image'), { image: initImg });
+            batch.set(db.collection('portfolio').doc('contact'), { email: initEmail, tiktok: initTiktok });
+
+            batch.commit().then(function() {
+                console.log("Firestore berhasil di-seed dengan seluruh data portofolio.");
+                updateFirebaseStatus('connected');
+                showToast("Berhasil Disinkronkan", "Seluruh data portofolio telah tersimpan di Firebase Firestore!");
+            }).catch(function(err) {
+                console.error("Gagal sinkronisasi data ke Firestore:", err);
+                handleFsError(err, "seedInitialData");
+            });
+        } catch (e) {
+            console.error("Error preparing data for Firestore:", e);
+            showToast("Error", "Gagal memproses data: " + e.message);
+        }
+    }
 
     // ================================
     //  NAVBAR SCROLL — ENHANCED
@@ -1884,7 +2169,7 @@
         document.querySelector('#heroMainTitleDisplay_editor').innerHTML = sectionsConfig.hero.mainTitle;
         document.querySelector('#heroNameDisplay_editor').innerHTML = sectionsConfig.hero.name;
         document.querySelector('#heroSubtextDisplay_editor').innerHTML = sectionsConfig.hero.subtitle;
-        var savedImg = localStorage.getItem('jml_profile_image') || "";
+        var savedImg = savedProfileImage || "";
         document.getElementById('admHeroImgPreview').src = savedImg || createJmlSvgUri('JML');
 
         document.querySelector('#aboutSectionTitleDisplay_editor').innerHTML = sectionsConfig.about.title;
@@ -1899,8 +2184,8 @@
         document.querySelector('#contactSubtitleDisplay_editor').innerHTML = sectionsConfig.contact.subtitle;
         document.querySelector('#footerCopyText_editor').innerHTML = sectionsConfig.footer.copy;
 
-        document.getElementById('admContactEmail').value = document.getElementById('emailTextDisplay').textContent;
-        document.getElementById('admContactTiktok').value = document.getElementById('footerTiktokUser').textContent
+        document.getElementById('admContactEmail').value = contactEmail || document.getElementById('emailTextDisplay').textContent;
+        document.getElementById('admContactTiktok').value = (contactTiktok || document.getElementById('footerTiktokUser').textContent)
             .replace('@', '');
 
         document.getElementById('admTechTitle').value = techStackData.title || '';
@@ -1929,7 +2214,6 @@
         sectionsConfig.hero.mainTitle = document.querySelector('#heroMainTitleDisplay_editor').innerHTML;
         sectionsConfig.hero.name = document.querySelector('#heroNameDisplay_editor').innerHTML;
         sectionsConfig.hero.subtitle = document.querySelector('#heroSubtextDisplay_editor').innerHTML;
-        localStorage.setItem('jml_sections_config', JSON.stringify(sectionsConfig));
 
         document.getElementById('heroBadgeDisplay').innerHTML = sectionsConfig.hero.badge;
         document.getElementById('heroMainTitleDisplay').innerHTML = sectionsConfig.hero.mainTitle;
@@ -1940,20 +2224,23 @@
         var heroImgDisplay = document.getElementById('heroImageDisplay');
         if (previewSrc && !previewSrc.includes('data:image/svg+xml')) {
             heroImgDisplay.src = previewSrc;
-            localStorage.setItem('jml_profile_image', previewSrc);
+            savedProfileImage = previewSrc;
+            fsSave('profile_image', { image: previewSrc });
         } else {
             heroImgDisplay.src = createJmlSvgUri('JML');
-            localStorage.removeItem('jml_profile_image');
+            savedProfileImage = "";
+            fsSave('profile_image', { image: "" });
         }
-        showToast("Perubahan Disimpan", "Hero dan foto profil diperbarui.");
+
+        fsSave('sections_config', sectionsConfig, "Perubahan Disimpan", "Hero dan foto profil diperbarui.");
     }
 
     function resetProfileImage() {
         document.getElementById('admHeroImgPreview').src = createJmlSvgUri('JML');
         document.getElementById('heroImageDisplay').src = createJmlSvgUri('JML');
         document.getElementById('admProfileFileInput').value = "";
-        localStorage.removeItem('jml_profile_image');
-        showToast("Foto Profil Dihapus", "Foto dikembalikan ke placeholder.");
+        savedProfileImage = "";
+        fsSave('profile_image', { image: "" }, "Foto Profil Dihapus", "Foto dikembalikan ke placeholder.");
     }
 
     // ----- About Admin -----
@@ -2021,10 +2308,9 @@
         if (iconInput) cards[index].icon = iconInput.value.trim() || '';
         if (subInput) cards[index].sub = subInput.value;
         if (contentInput) cards[index].content = contentInput.value;
-        localStorage.setItem('jml_sections_config', JSON.stringify(sectionsConfig));
+        fsSave('sections_config', sectionsConfig, "Card Diperbarui", "Perubahan disimpan.");
         renderAdminAboutCards();
         renderAboutCards();
-        showToast("Card Diperbarui", "Perubahan disimpan.");
     }
 
     function addAboutCard() {
@@ -2037,10 +2323,9 @@
         };
         cards.push(newCard);
         sectionsConfig.about.cards = cards;
-        localStorage.setItem('jml_sections_config', JSON.stringify(sectionsConfig));
+        fsSave('sections_config', sectionsConfig, "Card Ditambahkan", "Card baru berhasil dibuat.");
         renderAdminAboutCards();
         renderAboutCards();
-        showToast("Card Ditambahkan", "Card baru berhasil dibuat.");
     }
 
     function deleteAboutCard(index) {
@@ -2048,20 +2333,17 @@
         var cards = sectionsConfig.about.cards || [];
         cards.splice(index, 1);
         sectionsConfig.about.cards = cards;
-        localStorage.setItem('jml_sections_config', JSON.stringify(sectionsConfig));
+        fsSave('sections_config', sectionsConfig, "Card Dihapus", "Card berhasil dihapus.");
         renderAdminAboutCards();
         renderAboutCards();
-        showToast("Card Dihapus", "Card berhasil dihapus.");
     }
 
     function saveAboutSettings() {
         sectionsConfig.about.title = document.querySelector('#aboutSectionTitleDisplay_editor').innerHTML;
         sectionsConfig.about.subtitle = document.querySelector('#aboutSectionSubtitleDisplay_editor').innerHTML;
-        localStorage.setItem('jml_sections_config', JSON.stringify(sectionsConfig));
-
         document.getElementById('aboutSectionTitleDisplay').innerHTML = sectionsConfig.about.title;
         document.getElementById('aboutSectionSubtitleDisplay').innerHTML = sectionsConfig.about.subtitle;
-        showToast("Perubahan Disimpan", "Tentang Saya diperbarui.");
+        fsSave('sections_config', sectionsConfig, "Perubahan Disimpan", "Tentang Saya diperbarui.");
     }
 
     // ----- Projects Settings -----
@@ -2069,9 +2351,8 @@
         sectionsConfig.projects.title = document.querySelector('#projectsSectionTitleDisplay_editor').innerHTML;
         sectionsConfig.projects.subtitle = document.querySelector('#projectsSectionSubtitleDisplay_editor').innerHTML;
         sectionsConfig.projects.desc = document.querySelector('#projectsSectionDescDisplay_editor').innerHTML;
-        localStorage.setItem('jml_sections_config', JSON.stringify(sectionsConfig));
         renderProjects();
-        showToast("Perubahan Disimpan", "Pengaturan Projects diperbarui.");
+        fsSave('sections_config', sectionsConfig, "Perubahan Disimpan", "Pengaturan Projects diperbarui.");
     }
 
     // ----- Contact & Footer -----
@@ -2079,10 +2360,11 @@
         sectionsConfig.contact.title = document.querySelector('#contactTitleDisplay_editor').innerHTML;
         sectionsConfig.contact.subtitle = document.querySelector('#contactSubtitleDisplay_editor').innerHTML;
         sectionsConfig.footer.copy = document.querySelector('#footerCopyText_editor').innerHTML;
-        localStorage.setItem('jml_sections_config', JSON.stringify(sectionsConfig));
 
         var email = document.getElementById('admContactEmail').value;
         var tiktok = document.getElementById('admContactTiktok').value;
+        contactEmail = email;
+        contactTiktok = tiktok;
 
         document.getElementById('contactTitleDisplay').innerHTML = sectionsConfig.contact.title;
         document.getElementById('contactSubtitleDisplay').innerHTML = sectionsConfig.contact.subtitle;
@@ -2093,10 +2375,8 @@
         document.getElementById('mailLinkBtn').href = 'mailto:' + email;
         document.getElementById('footerCopyText').innerHTML = sectionsConfig.footer.copy;
 
-        localStorage.setItem('jml_contact_email', email);
-        localStorage.setItem('jml_contact_tiktok', tiktok);
-
-        showToast("Perubahan Disimpan", "Kontak & footer diperbarui.");
+        fsSave('contact', { email: email, tiktok: tiktok });
+        fsSave('sections_config', sectionsConfig, "Perubahan Disimpan", "Kontak & footer diperbarui.");
     }
 
     // ----- Security -----
@@ -2105,10 +2385,9 @@
         var p = document.getElementById('admNewPassword').value;
         if (u && p) {
             adminAuth = { user: u, pass: p };
-            localStorage.setItem('jml_admin_auth', JSON.stringify(adminAuth));
+            fsSave('admin_auth', adminAuth, "Keamanan Diperbarui", "Credential login berhasil diganti!");
             document.getElementById('admNewUsername').value = '';
             document.getElementById('admNewPassword').value = '';
-            showToast("Keamanan Diperbarui", "Credential login berhasil diganti!");
         } else {
             showToast("Peringatan", "Mohon isi username dan password baru.");
         }
@@ -2138,7 +2417,7 @@
 
     document.getElementById('techVisibilityToggle').addEventListener('click', function() {
         techStackData.visible = !techStackData.visible;
-        localStorage.setItem('jml_tech_stack', JSON.stringify(techStackData));
+        fsSave('tech_stack', techStackData);
         updateTechVisibilityUI();
         renderTechStack();
         showToast('Perubahan', 'Tech Stack ' + (techStackData.visible ? 'ditampilkan' : 'disembunyikan') + '.');
@@ -2147,9 +2426,8 @@
     function saveTechStackSettings() {
         techStackData.title = document.getElementById('admTechTitle').value.trim() || 'Tech Stack & Skills';
         techStackData.subtitle = document.getElementById('admTechSubtitle').value.trim();
-        localStorage.setItem('jml_tech_stack', JSON.stringify(techStackData));
+        fsSave('tech_stack', techStackData, 'Berhasil', 'Pengaturan Tech Stack disimpan.');
         renderTechStack();
-        showToast('Berhasil', 'Pengaturan Tech Stack disimpan.');
     }
 
     function renderTechBadgeList() {
@@ -2236,11 +2514,10 @@
             techStackData.badges.push(newBadge);
         }
 
-        localStorage.setItem('jml_tech_stack', JSON.stringify(techStackData));
+        fsSave('tech_stack', techStackData, 'Berhasil', 'Badge berhasil disimpan.');
         renderTechStack();
         renderTechBadgeList();
         closeTechBadgeModal();
-        showToast('Berhasil', 'Badge berhasil disimpan.');
     }
 
     function editTechBadge(id) {
@@ -2251,10 +2528,9 @@
     function deleteTechBadge(id) {
         if (confirm('Hapus badge ini?')) {
             techStackData.badges = techStackData.badges.filter(function(b) { return b.id !== id; });
-            localStorage.setItem('jml_tech_stack', JSON.stringify(techStackData));
+            fsSave('tech_stack', techStackData, 'Terhapus', 'Badge berhasil dihapus.');
             renderTechStack();
             renderTechBadgeList();
-            showToast('Terhapus', 'Badge berhasil dihapus.');
         }
     }
 
@@ -2293,12 +2569,11 @@
         }
         var newCat = { id: Date.now(), key: key, label: label };
         categories.push(newCat);
-        localStorage.setItem('jml_categories', JSON.stringify(categories));
+        fsSave('categories', { list: categories }, 'Berhasil', 'Kategori "' + label + '" ditambahkan.');
         renderCategoryList();
         renderFilterButtons();
         populateCategorySelect();
         input.value = '';
-        showToast('Berhasil', 'Kategori "' + label + '" ditambahkan.');
     }
 
     function deleteCategory(id) {
@@ -2312,11 +2587,10 @@
         }
         if (confirm('Hapus kategori "' + cat.label + '"?')) {
             categories = categories.filter(function(c) { return c.id !== id; });
-            localStorage.setItem('jml_categories', JSON.stringify(categories));
+            fsSave('categories', { list: categories }, 'Berhasil', 'Kategori dihapus.');
             renderCategoryList();
             renderFilterButtons();
             populateCategorySelect();
-            showToast('Berhasil', 'Kategori dihapus.');
         }
     }
 
@@ -2427,10 +2701,9 @@
     function deleteProject(id) {
         if (confirm('Hapus project ini?')) {
             projectsData = projectsData.filter(function(p) { return p.id !== id; });
-            localStorage.setItem('jml_projects', JSON.stringify(projectsData));
+            fsSave('projects', { list: projectsData }, "Terhapus", "Project berhasil dihapus.");
             renderProjects();
             renderAdminProjectsList();
-            showToast("Terhapus", "Project berhasil dihapus.");
         }
     }
 
@@ -2524,7 +2797,7 @@
                 };
                 projectsData.unshift(newProj);
             }
-            localStorage.setItem('jml_projects', JSON.stringify(projectsData));
+            fsSave('projects', { list: projectsData });
             renderProjects();
             renderAdminProjectsList();
         } else {
@@ -2559,7 +2832,7 @@
                         imageSrc: currentCardImageData
                     });
                 }
-                localStorage.setItem('jml_custom_sections', JSON.stringify(customSections));
+                fsSave('custom_sections', { list: customSections });
                 renderCustomSections();
                 renderAdminCustomSections();
             }
@@ -2587,12 +2860,11 @@
             cards: []
         };
         customSections.push(newSec);
-        localStorage.setItem('jml_custom_sections', JSON.stringify(customSections));
+        fsSave('custom_sections', { list: customSections }, "Section Dibuat", "Section baru ditambahkan.");
         renderCustomSections();
         renderAdminCustomSections();
         document.getElementById('newSectionTitle').value = '';
         document.getElementById('newSectionSubtitle').value = '';
-        showToast("Section Dibuat", "Section baru ditambahkan.");
     }
 
     function renderAdminCustomSections() {
@@ -2701,10 +2973,9 @@
         var sec = customSections.find(function(s) { return s.id === sectionId; });
         if (sec && sec.cards) {
             sec.cards = sec.cards.filter(function(c) { return c.id !== cardId; });
-            localStorage.setItem('jml_custom_sections', JSON.stringify(customSections));
+            fsSave('custom_sections', { list: customSections }, "Card Dihapus", "Card berhasil dihapus.");
             renderCustomSections();
             renderAdminCustomSections();
-            showToast("Card Dihapus", "Card berhasil dihapus.");
         }
     }
 
@@ -2712,7 +2983,7 @@
         var sec = customSections.find(function(s) { return s.id === id; });
         if (sec) {
             sec.hidden = !sec.hidden;
-            localStorage.setItem('jml_custom_sections', JSON.stringify(customSections));
+            fsSave('custom_sections', { list: customSections });
             renderCustomSections();
             renderAdminCustomSections();
             showToast("Status Section", sec.hidden ? "Section disembunyikan." : "Section ditampilkan.");
@@ -2721,10 +2992,9 @@
 
     function deleteCustomSection(id) {
         customSections = customSections.filter(function(s) { return s.id !== id; });
-        localStorage.setItem('jml_custom_sections', JSON.stringify(customSections));
+        fsSave('custom_sections', { list: customSections }, "Section Dihapus", "Section dan seluruh cardnya dihapus.");
         renderCustomSections();
         renderAdminCustomSections();
-        showToast("Section Dihapus", "Section dan seluruh cardnya dihapus.");
     }
 
     // ================================
@@ -2805,56 +3075,17 @@
         // Editor toolbars
         buildEditorToolbars();
 
-        // Profile image
-        var savedProfileImg = localStorage.getItem('jml_profile_image');
-        if (savedProfileImg) {
-            document.getElementById('heroImageDisplay').src = savedProfileImg;
-        } else {
-            document.getElementById('heroImageDisplay').src = createJmlSvgUri('JML');
-        }
+        // Tampilkan initial local state ke UI
+        applyDataToUI();
 
-        // Apply sections config
-        document.getElementById('heroBadgeDisplay').innerHTML = sectionsConfig.hero.badge;
-        document.getElementById('heroMainTitleDisplay').innerHTML = sectionsConfig.hero.mainTitle;
-        document.getElementById('heroNameDisplay').innerHTML = sectionsConfig.hero.name;
-        document.getElementById('heroSubtextDisplay').innerHTML = sectionsConfig.hero.subtitle;
-
-        document.getElementById('aboutSectionTitleDisplay').innerHTML = sectionsConfig.about.title;
-        document.getElementById('aboutSectionSubtitleDisplay').innerHTML = sectionsConfig.about.subtitle;
-
-        document.getElementById('projectsSectionTitleDisplay').innerHTML = sectionsConfig.projects.title;
-        document.getElementById('projectsSectionSubtitleDisplay').innerHTML = sectionsConfig.projects.subtitle;
-        document.getElementById('projectsSectionDescDisplay').innerHTML = sectionsConfig.projects.desc;
-
-        document.getElementById('contactTitleDisplay').innerHTML = sectionsConfig.contact.title;
-        document.getElementById('contactSubtitleDisplay').innerHTML = sectionsConfig.contact.subtitle;
-        document.getElementById('footerCopyText').innerHTML = sectionsConfig.footer.copy;
-
-        // Restore contact
-        var savedEmail = localStorage.getItem('jml_contact_email');
-        if (savedEmail) {
-            document.getElementById('emailTextDisplay').innerHTML = savedEmail;
-            document.getElementById('mailLinkBtn').href = 'mailto:' + savedEmail;
-        }
-        var savedTiktok = localStorage.getItem('jml_contact_tiktok');
-        if (savedTiktok) {
-            document.getElementById('footerTiktokUser').innerHTML = '@' + savedTiktok;
-            document.getElementById('footerTiktokLink').href = 'https://www.tiktok.com/@' + savedTiktok;
-            document.getElementById('tiktokLinkBtn').href = 'https://www.tiktok.com/@' + savedTiktok;
-        }
-
-        // Render
-        renderFilterButtons();
+        // Filter listeners
         setupFilterListeners();
 
         // ENHANCED NAVBAR SCROLL (drag + keyboard arrow)
         initNavbarMouseScroll();
 
-        // Render semua
-        renderAboutCards();
-        renderTechStack();
-        renderProjects();
-        renderCustomSections();
+        // Inisialisasi sinkronisasi data dengan Firebase Firestore
+        initFirestoreSync();
     };
 </script>
 
